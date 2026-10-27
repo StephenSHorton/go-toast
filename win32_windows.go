@@ -39,8 +39,8 @@ var (
 	procSetLayeredAttrs    = user32.NewProc("SetLayeredWindowAttributes")
 	procSetTimer           = user32.NewProc("SetTimer")
 	procKillTimer          = user32.NewProc("KillTimer")
-	procGetWindowLongPtr   = user32.NewProc("GetWindowLongPtrW")
-	procSetWindowLongPtr   = user32.NewProc("SetWindowLongPtrW")
+	procGetWindowLong      = user32.NewProc("GetWindowLongW") // not ...LongPtrW: absent from 32-bit user32; WS_EX_* fits in 32 bits
+	procSetWindowLong      = user32.NewProc("SetWindowLongW")
 	procInvalidateRect     = user32.NewProc("InvalidateRect")
 	procSetCursor          = user32.NewProc("SetCursor")
 	procLoadCursor         = user32.NewProc("LoadCursorW")
@@ -259,13 +259,13 @@ func killTimer(h hwnd, id uintptr) { _, _, _ = procKillTimer.Call(uintptr(h), id
 
 func getExStyle(h hwnd) uintptr {
 	idx := int32(gwlExStyle)
-	r, _, _ := procGetWindowLongPtr.Call(uintptr(h), uintptr(idx))
-	return r
+	r, _, _ := procGetWindowLong.Call(uintptr(h), uintptr(idx))
+	return r & 0xffffffff // LONG result: keep the low 32 bits
 }
 
 func setExStyle(h hwnd, v uintptr) {
 	idx := int32(gwlExStyle)
-	_, _, _ = procSetWindowLongPtr.Call(uintptr(h), uintptr(idx), v)
+	_, _, _ = procSetWindowLong.Call(uintptr(h), uintptr(idx), v)
 }
 
 func invalidate(h hwnd) { _, _, _ = procInvalidateRect.Call(uintptr(h), 0, 0) }
