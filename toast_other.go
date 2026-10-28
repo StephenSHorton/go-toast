@@ -21,7 +21,8 @@ func HoldClickThrough() (release func()) { return func() {} }
 // Visible always reports false on this platform.
 func Visible() bool { return false }
 
-// Main just calls run on this platform; see the macOS Main.
+// Main just calls run on this platform; see the macOS Main (which a Wails or
+// other Cocoa app must not call).
 func Main(run func()) { run() }
 
 func optionsChanged(Options) {}

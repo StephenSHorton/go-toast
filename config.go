@@ -191,9 +191,12 @@ type Config struct {
 	// about 10 matches Irori's cards.
 	CornerRadius float64
 	// IgnoreInput, when set, is asked about every mouse message a card gets,
-	// with the event's GetMessageExtraInfo value; true drops it (no hover, no
-	// press). An app that injects input of its own (an auto clicker) tags it
-	// and ignores it here so it never presses a card. Nil ignores nothing.
+	// with the event's tag; true drops it (no hover, no press). The tag is
+	// GetMessageExtraInfo on Windows (SendInput's dwExtraInfo) and the
+	// CGEvent's kCGEventSourceUserData field on macOS (set it with
+	// CGEventSetIntegerValueField before CGEventPost). An app that injects
+	// input of its own (an auto clicker) tags it and ignores it here so it
+	// never presses a card. Nil ignores nothing.
 	IgnoreInput func(extraInfo uintptr) bool
 	// CaptureExclude keeps the cards out of screenshots and screen recordings
 	// (WDA_EXCLUDEFROMCAPTURE, Windows 10 2004+) while they stay on screen.
@@ -210,7 +213,7 @@ const maxCornerRadius = 24
 
 // normalized fills defaults and clamps out-of-range values.
 func (c Config) normalized() Config {
-	c.AppName = strings.TrimSpace(c.AppName)
+	c.AppName = validText(strings.TrimSpace(c.AppName))
 	if c.AppName == "" {
 		c.AppName = DefaultConfig().AppName
 	}

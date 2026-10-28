@@ -28,6 +28,14 @@ static ToastRect topDown(NSRect r) {
 
 static NSRect fromRect(ToastRect r) { return NSMakeRect(r.l, r.t, r.r - r.l, r.b - r.t); }
 
+// str makes an NSString from Go's UTF-8, never nil (stringWithUTF8String
+// returns nil for invalid UTF-8; the Go side already replaces it with U+FFFD,
+// so this is a guard).
+static NSString *str(const char *s) {
+	NSString *out = s ? [NSString stringWithUTF8String:s] : nil;
+	return out ?: @"";
+}
+
 // ToastPanel is never key or main, so it can't take focus from anything.
 @interface ToastPanel : NSPanel
 @end
@@ -129,7 +137,10 @@ static void drawLine(NSString *s, NSFont *f, NSColor *c, NSRect r, NSTextAlignme
 
 - (void)send:(int)ev event:(NSEvent *)e {
 	NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
-	goToastMouse(self.key, ev, p.x, p.y);
+	// The tag an app put on input it injected (Config.IgnoreInput).
+	CGEventRef cg = e.CGEvent;
+	int64_t tag = cg ? CGEventGetIntegerValueField(cg, kCGEventSourceUserData) : 0;
+	goToastMouse(self.key, ev, p.x, p.y, tag);
 }
 - (void)mouseEntered:(NSEvent *)e { [self send:toastMove event:e]; }
 - (void)mouseMoved:(NSEvent *)e { [self send:toastMove event:e]; }
@@ -306,7 +317,7 @@ ToastRect toast_work_area(int active, ToastRect old) {
 }
 
 int toast_body_lines(const char *body, double width, double size) {
-	NSString *s = [NSString stringWithUTF8String:body];
+	NSString *s = str(body);
 	if (!s.length) {
 		return 0;
 	}
@@ -319,8 +330,7 @@ int toast_body_lines(const char *body, double width, double size) {
 }
 
 double toast_text_width(const char *s, double size) {
-	NSString *str = [NSString stringWithUTF8String:s];
-	return ceil([str sizeWithAttributes:@{NSFontAttributeName : font(size, YES)}].width);
+	return ceil([str(s) sizeWithAttributes:@{NSFontAttributeName : font(size, YES)}].width);
 }
 
 int toast_card_create(uint64_t key, const char *title, int captureExclude, double w, double h) {
@@ -331,7 +341,7 @@ int toast_card_create(uint64_t key, const char *title, int captureExclude, doubl
 	if (!p) {
 		return 0;
 	}
-	p.title = [NSString stringWithUTF8String:title];
+	p.title = str(title);
 	p.releasedWhenClosed = NO;
 	p.floatingPanel = YES;
 	p.becomesKeyOnlyIfNeeded = YES;
@@ -365,16 +375,16 @@ void toast_card_content(uint64_t key, const char *title, const char *body, int k
 	if (!v) {
 		return;
 	}
-	v.title = [NSString stringWithUTF8String:title];
-	v.body = [NSString stringWithUTF8String:body];
+	v.title = str(title);
+	v.body = str(body);
 	v.kind = kind;
 	v.lines = lines;
 	NSMutableArray *labels = [NSMutableArray array];
 	if (nlabels > 0) {
-		[labels addObject:[NSString stringWithUTF8String:label0]];
+		[labels addObject:str(label0)];
 	}
 	if (nlabels > 1) {
-		[labels addObject:[NSString stringWithUTF8String:label1]];
+		[labels addObject:str(label1)];
 	}
 	v.labels = labels;
 	v.closeR = fromRect(close);
@@ -540,7 +550,9 @@ ToastPanelInfo toast_test_info(uint64_t key) {
 
 // toast_test_mouse sends a synthetic mouse event at (x, y) in the card's
 // top-down view coordinates through the window, as a real click would arrive.
-void toast_test_mouse(uint64_t key, int ev, double x, double y) {
+// A nonzero tag goes in the event's kCGEventSourceUserData field, as an app
+// that injects input with CGEventPost tags it.
+void toast_test_mouse(uint64_t key, int ev, double x, double y, int64_t tag) {
 	dispatch_sync(dispatch_get_main_queue(), ^{
 		ToastPanel *p = panelFor(key);
 		if (!p) {
@@ -565,6 +577,15 @@ void toast_test_mouse(uint64_t key, int ev, double x, double y) {
 		                             eventNumber:0
 		                              clickCount:1
 		                                pressure:t == NSEventTypeLeftMouseDown ? 1 : 0];
+		if (tag != 0 && e.CGEvent) {
+			CGEventRef cg = CGEventCreateCopy(e.CGEvent);
+			CGEventSetIntegerValueField(cg, kCGEventSourceUserData, tag);
+			NSEvent *tagged = [NSEvent eventWithCGEvent:cg];
+			CFRelease(cg);
+			if (tagged) {
+				e = tagged;
+			}
+		}
 		if (t == NSEventTypeMouseMoved) {
 			[v mouseMoved:e]; // tracking-area events don't route through sendEvent:
 		} else {

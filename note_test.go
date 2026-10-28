@@ -5,6 +5,7 @@ import (
 	"math"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 var t0 = time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
@@ -110,6 +111,18 @@ func TestCleanAndClose(t *testing.T) {
 	n, _ := clean(Note{Body: "Copied", Actions: make([]Action, 3)})
 	if n.Title != "Copied" || n.Body != "" || len(n.Actions) != maxActions {
 		t.Errorf("clean = %+v", n)
+	}
+	acts := []Action{{Label: "Open \xff"}}
+	n, _ = clean(Note{Title: "Saved \xe2\x82", Body: "a\xc0b", Actions: acts})
+	bad := string(utf8.RuneError)
+	if n.Title != "Saved "+bad || n.Body != "a"+bad+"b" || n.Actions[0].Label != "Open "+bad {
+		t.Errorf("invalid UTF-8 not replaced: %+q", []string{n.Title, n.Body, n.Actions[0].Label})
+	}
+	if acts[0].Label != "Open \xff" {
+		t.Error("clean changed the caller's actions")
+	}
+	if c := (Config{AppName: "App\xff"}).normalized(); c.AppName != "App"+bad {
+		t.Errorf("AppName %q", c.AppName)
 	}
 	var s stack
 	s.post(Note{ID: "a", Title: "a"}, t0)

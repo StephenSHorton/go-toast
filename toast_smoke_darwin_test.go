@@ -5,6 +5,7 @@ package toast
 import (
 	"os"
 	"os/exec"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -42,6 +43,16 @@ func TestToastSmoke(t *testing.T) {
 	shot := os.Getenv("GO_TOAST_SHOT")
 	if shot != "" {
 		c.CaptureExclude = false
+	}
+	// Input tagged injectTag (kCGEventSourceUserData), as an auto clicker
+	// tags what it posts, never presses a card.
+	const injectTag = 0x746f7275
+	var sawTag atomic.Uint64
+	c.IgnoreInput = func(tag uintptr) bool {
+		if tag != 0 {
+			sawTag.Store(uint64(tag))
+		}
+		return tag == injectTag
 	}
 	Configure(c)
 	SetOptions(DefaultOptions())
@@ -135,6 +146,21 @@ func TestToastSmoke(t *testing.T) {
 	// Click the update card's primary button, as the user would. A point just
 	// inside its left edge is on it (see the Windows smoke test).
 	b := buttonRects(np.frame.R-np.frame.L, np.frame.B-np.frame.T, []int{30, 30}, 1)[0]
+	// Tagged (injected) input on the button first: IgnoreInput drops it.
+	mouseTagged(newest, evMove, b.L+4, b.T+4, injectTag)
+	mouseTagged(newest, evDown, b.L+4, b.T+4, injectTag)
+	mouseTagged(newest, evUp, b.L+4, b.T+4, injectTag)
+	if got := sawTag.Load(); got != injectTag {
+		t.Errorf("IgnoreInput saw tag %#x, want %#x", got, injectTag)
+	}
+	select {
+	case got := <-ran:
+		t.Fatalf("tagged input pressed the card: ran %q", got)
+	case <-time.After(300 * time.Millisecond):
+	}
+	if n := len(cardKeys()); n != 3 {
+		t.Fatalf("%d cards after tagged input, want 3", n)
+	}
 	mouseAt(newest, evMove, b.L+4, b.T+4)
 	mouseAt(newest, evDown, b.L+4, b.T+4)
 	mouseAt(newest, evUp, b.L+4, b.T+4)
@@ -164,6 +190,18 @@ func TestToastSmoke(t *testing.T) {
 		return right > newest
 	}) {
 		t.Fatal("the right-click card never showed")
+	}
+	// A press dragged off the card and released there is no click.
+	mouseAt(right, evMove, 60, 20)
+	mouseAt(right, evDown, 60, 20)
+	mouseAt(right, evUp, -40, 20)
+	select {
+	case <-dismissed:
+		t.Fatal("a release off the card dismissed it")
+	case <-time.After(300 * time.Millisecond):
+	}
+	if !infoOf(right).exists {
+		t.Fatal("a release off the card closed it")
 	}
 	mouseAt(right, evRightDown, 60, 20)
 	mouseAt(right, evRightUp, 60, 20)

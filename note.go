@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // Kind picks a card's accent, icon and sound.
@@ -160,17 +161,30 @@ func defaultLifetime(n Note) time.Duration {
 }
 
 // clean trims a note to what a card can show. ok is false for a note with
-// nothing to say.
+// nothing to say. Invalid UTF-8 becomes U+FFFD, as Windows' UTF-16
+// conversion does, so a bad byte shows the same on every platform (and
+// AppKit, which rejects invalid UTF-8 outright, gets valid text).
 func clean(n Note) (Note, bool) {
-	n.Title, n.Body = strings.TrimSpace(n.Title), strings.TrimSpace(n.Body)
+	n.Title, n.Body = validText(strings.TrimSpace(n.Title)), validText(strings.TrimSpace(n.Body))
 	if n.Title == "" {
 		n.Title, n.Body = n.Body, ""
 	}
 	if len(n.Actions) > maxActions {
 		n.Actions = n.Actions[:maxActions]
 	}
+	if len(n.Actions) > 0 { // a copy: the caller's slice stays as it was
+		acts := make([]Action, len(n.Actions))
+		for i, a := range n.Actions {
+			a.Label = validText(a.Label)
+			acts[i] = a
+		}
+		n.Actions = acts
+	}
 	return n, n.Title != ""
 }
+
+// validText replaces each run of invalid UTF-8 in s with U+FFFD.
+func validText(s string) string { return strings.ToValidUTF8(s, string(utf8.RuneError)) }
 
 // card is a note on screen.
 type card struct {

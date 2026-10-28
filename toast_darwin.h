@@ -59,5 +59,5 @@ typedef struct {
 	ToastRect work;  // the visible frame of the card's screen, top-down
 } ToastPanelInfo;
 ToastPanelInfo toast_test_info(uint64_t key);
-void toast_test_mouse(uint64_t key, int ev, double x, double y);
+void toast_test_mouse(uint64_t key, int ev, double x, double y, int64_t tag);
 int toast_test_frontmost_pid(void);

@@ -31,8 +31,9 @@ import (
 )
 
 func main() {
-	// On macOS a plain Go program hands the main thread to AppKit with Main
-	// (a Wails app doesn't need it). Elsewhere Main just calls the function.
+	// On macOS a plain Go program hands the main thread to AppKit with Main.
+	// Elsewhere Main just calls the function. Do NOT do this in a Wails,
+	// systray or other Cocoa app: call run (or wails.Run) directly there.
 	toast.Main(run)
 }
 
@@ -81,7 +82,7 @@ func run() {
 | `HoldClickThrough()` | Lets clicks pass through the cards until you call the returned release. Holds can overlap. |
 | `Visible()` | Reports whether any card is on screen. |
 | `Configure` / `CurrentConfig` | The app-level setup (below). |
-| `Main(func())` | macOS: runs the function while the main thread runs AppKit's event loop. Only programs without a Cocoa event loop of their own need it. Elsewhere it just calls the function. |
+| `Main(func())` | macOS: runs the function while the main thread runs AppKit's event loop. Only programs without a Cocoa event loop of their own need it, and a Wails, systray or other Cocoa app must **not** call it (see [macOS notes](#macos-notes)). Elsewhere it just calls the function. |
 
 `Note` fields: `ID`, `Title`, `Body` (cut to two lines), `Kind`
 (`Info`, `Success`, `Warn`, `Error`), `Silent`, `Expire`, `Sticky`,
@@ -105,7 +106,7 @@ only affects cards created later.
 | `ClassPrefix` | from `AppName` | Windows only. Window class names: cards use `ClassPrefix` and the hidden host window uses `ClassPrefix+"Host"`. `"Toru"` gives `ToruToast` and `ToruToastHost`. |
 | `Palette` | `Dark` | Card colors. |
 | `CornerRadius` | `0` | Corner rounding in dip. `0` is square; about `10` gives soft cards. |
-| `IgnoreInput` | `nil` | `func(extraInfo uintptr) bool`. It gets the `GetMessageExtraInfo` value of each mouse message a card receives; return true to drop that message. Use it to keep your app's own injected input (from `SendInput` with a tagged `dwExtraInfo`) from pressing a card. Windows only; macOS ignores it. |
+| `IgnoreInput` | `nil` | `func(extraInfo uintptr) bool`. It gets the tag of each mouse event a card receives; return true to drop that event. Use it to keep your app's own injected input from pressing a card. On Windows the tag is `GetMessageExtraInfo` (`SendInput` with a tagged `dwExtraInfo`); on macOS it is the CGEvent's `kCGEventSourceUserData` field (set it with `CGEventSetIntegerValueField` before `CGEventPost`). |
 | `CaptureExclude` | `true` | Hides cards from screenshots and screen recordings while they stay on screen. Windows uses `WDA_EXCLUDEFROMCAPTURE` (Windows 10 2004+); macOS uses `NSWindowSharingNone`. |
 
 Start from `DefaultConfig()` rather than `Config{}`: in a zero literal,
@@ -151,6 +152,13 @@ Build colors with `toast.RGB(r, g, b)` or `toast.Hex("#rrggbb")`. The zero
   Windows. Instead the package queues its work on the main dispatch queue.
   - In a Wails app, or any program with its own Cocoa event loop, this just
     works. Cards posted before the loop starts appear when it does.
+  - **Do not call `Main` in a Wails, systray or other Cocoa app.** At the
+    top of `main` no event loop runs yet, so `Main` can't tell one will
+    start later. It takes the main thread for its own loop and moves `run`
+    (and so `wails.Run`) to another thread, where the app's own AppKit calls
+    abort with `NSWindow should only be instantiated on the main thread!`.
+    Windows and Linux never show this, so don't wrap `main` "to keep one main
+    function for every platform" in such an app.
   - A plain Go program must hand over its main thread: wrap `main` in
     `toast.Main(run)`. `Main` runs `NSApp` on the main thread and runs `run`
     on another goroutine. It returns when `run` returns. A binary with no
@@ -168,8 +176,14 @@ Build colors with `toast.RGB(r, g, b)` or `toast.Hex("#rrggbb")`. The zero
   code.
 - **Input.** Hovering over the stack pauses expiry. A click on the body runs
   `OnClick`. The x, a right click and a Control-click dismiss the card.
-  `HoldClickThrough` sets `ignoresMouseEvents`. `Config.IgnoreInput` has no
-  macOS equivalent and is ignored.
+  `Config.IgnoreInput` gets each event's `kCGEventSourceUserData`, so an app
+  that tags the events it posts keeps them off the cards from the first one.
+  `HoldClickThrough` sets `ignoresMouseEvents`, but through the main queue,
+  so it takes effect only once a busy main thread gets to it. Use
+  `IgnoreInput` for injected input that must never press a card. A press
+  dragged off a card and released elsewhere is not a click.
+- **Text.** Invalid UTF-8 in a title, body, button label or `AppName` shows
+  as U+FFFD, as on Windows.
 - **Capture.** `CaptureExclude` sets `NSWindowSharingNone`. Some recorders
   built on ScreenCaptureKit on recent macOS versions still capture such
   windows, so treat it as best effort there.

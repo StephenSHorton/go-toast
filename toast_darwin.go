@@ -4,7 +4,7 @@ package toast
 
 /*
 #cgo CFLAGS: -x objective-c -fobjc-arc
-#cgo LDFLAGS: -framework AppKit -framework AVFoundation -framework QuartzCore
+#cgo LDFLAGS: -framework AppKit -framework AVFoundation -framework QuartzCore -framework CoreGraphics
 #include <stdlib.h>
 #include "toast_darwin.h"
 */
@@ -143,7 +143,9 @@ func Show(title, body string, ok bool) {
 }
 
 // HoldClickThrough makes the cards click-through (ignoresMouseEvents) until
-// the returned release is called. Holds nest.
+// the returned release is called. Holds nest. The change is queued on the
+// main thread, so it can lag a busy main thread; to keep injected input off
+// the cards from the first event, tag it and use Config.IgnoreInput.
 func HoldClickThrough() (release func()) {
 	mu.Lock()
 	through++
@@ -179,9 +181,12 @@ func optionsChanged(o Options) {
 //
 //	func main() { toast.Main(realMain) }
 //
-// Call it from main (the main goroutine). When an event loop is already
-// running, or Main isn't called on the main thread, it just calls run. On
-// other platforms it just calls run.
+// Do NOT call it in a Wails, systray or other Cocoa app. Main can't tell that
+// such an app will start its own event loop later, so it takes the main
+// thread for AppKit and moves run (and so wails.Run) to another thread, where
+// the app's own AppKit calls abort. Those apps already run the loop the cards
+// need. When an event loop is already running, or Main isn't called on the
+// main thread, it just calls run. On other platforms it just calls run.
 func Main(run func()) {
 	if C.toast_main_thread() == 0 || C.toast_app_running() != 0 {
 		run()
@@ -471,11 +476,24 @@ func destroyCard(cw *cardWin) {
 	shown.Add(-1)
 }
 
+// goToastMouse handles a mouse event on a card's view at (fx, fy) in its
+// top-down coordinates. tag is the event's kCGEventSourceUserData field,
+// which Config.IgnoreInput sees (as GetMessageExtraInfo on Windows).
+//
 //export goToastMouse
-func goToastMouse(key C.uint64_t, ev C.int, fx, fy C.double) {
+func goToastMouse(key C.uint64_t, ev C.int, fx, fy C.double, tag C.int64_t) {
 	cw := wins[uint64(key)]
 	if cw == nil || cw.through {
 		return
+	}
+	if ev != C.toastLeave {
+		// The app's own synthetic input (an auto clicker) neither hovers nor
+		// presses a card: a run at a fixed point must not hit Install. This
+		// filters in the event itself, so unlike HoldClickThrough it doesn't
+		// wait for the main queue.
+		if ignore := cw.cfg.IgnoreInput; ignore != nil && ignore(uintptr(tag)) {
+			return
+		}
 	}
 	x, y := int(math.Floor(float64(fx))), int(math.Floor(float64(fy)))
 	switch ev {
@@ -491,8 +509,14 @@ func goToastMouse(key C.uint64_t, ev C.int, fx, fy C.double) {
 	case C.toastDown:
 		cw.pressed = hitPart(x, y, cw.close, cw.buttons)
 	case C.toastUp:
-		// Pressed and released on the same part, like a button.
-		if p := hitPart(x, y, cw.close, cw.buttons); p == cw.pressed {
+		// Pressed and released on the same part, like a button. AppKit sends
+		// the release to the pressed view wherever the pointer is, so one off
+		// the card (a press dragged away) is no click, as on Windows.
+		p := partNone
+		if x >= 0 && y >= 0 && x < cw.w && y < cw.h {
+			p = hitPart(x, y, cw.close, cw.buttons)
+		}
+		if p != partNone && p == cw.pressed {
 			click(cw.key, p)
 		}
 		cw.pressed = partNone
@@ -566,9 +590,12 @@ func infoOf(key uint64) panelInfo {
 }
 
 // mouseAt sends a synthetic mouse event at (x, y) in key's top-down view
-// coordinates.
-func mouseAt(key uint64, ev int, x, y int) {
-	C.toast_test_mouse(C.uint64_t(key), C.int(ev), C.double(x), C.double(y))
+// coordinates. A nonzero tag goes in the event's kCGEventSourceUserData, as
+// an app tags the input it injects.
+func mouseAt(key uint64, ev int, x, y int) { mouseTagged(key, ev, x, y, 0) }
+
+func mouseTagged(key uint64, ev int, x, y int, tag int64) {
+	C.toast_test_mouse(C.uint64_t(key), C.int(ev), C.double(x), C.double(y), C.int64_t(tag))
 }
 
 const (
