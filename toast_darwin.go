@@ -572,10 +572,11 @@ func mouseAt(key uint64, ev int, x, y int) {
 }
 
 const (
-	evMove    = C.toastMove
-	evDown    = C.toastDown
-	evUp      = C.toastUp
-	evRightUp = C.toastRightUp
+	evMove      = C.toastMove
+	evDown      = C.toastDown
+	evUp        = C.toastUp
+	evRightUp   = C.toastRightUp
+	evRightDown = C.toastRightDown
 )
 
 func frontmostPID() int { return int(C.toast_test_frontmost_pid()) }

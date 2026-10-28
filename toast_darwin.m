@@ -553,6 +553,7 @@ void toast_test_mouse(uint64_t key, int ev, double x, double y) {
 		case toastDown: t = NSEventTypeLeftMouseDown; break;
 		case toastUp: t = NSEventTypeLeftMouseUp; break;
 		case toastRightUp: t = NSEventTypeRightMouseUp; break;
+		case toastRightDown: t = NSEventTypeRightMouseDown; break;
 		default: t = NSEventTypeMouseMoved; break;
 		}
 		NSEvent *e = [NSEvent mouseEventWithType:t

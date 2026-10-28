@@ -150,6 +150,7 @@ func TestToastSmoke(t *testing.T) {
 	}) {
 		t.Fatal("the right-click card never showed")
 	}
+	mouseAt(right, evRightDown, 60, 20)
 	mouseAt(right, evRightUp, 60, 20)
 	select {
 	case <-dismissed:

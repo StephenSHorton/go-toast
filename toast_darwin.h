@@ -22,8 +22,9 @@ typedef struct {
 	double titleH, titleSize, bodyGap, bodySize, buttonSize;
 } ToastGeom;
 
-// Mouse events forwarded to goToastMouse.
-enum { toastMove = 1, toastLeave, toastDown, toastUp, toastRightUp };
+// Mouse events forwarded to goToastMouse (toastRightDown only by toast_test_mouse;
+// the view itself ignores a right press and acts on the release).
+enum { toastMove = 1, toastLeave, toastDown, toastUp, toastRightUp, toastRightDown };
 
 // Any thread.
 void toast_wake(void);                  // queue goToastSync on the main thread
