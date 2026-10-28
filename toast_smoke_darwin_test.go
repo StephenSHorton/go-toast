@@ -4,6 +4,7 @@ package toast
 
 import (
 	"os"
+	"os/exec"
 	"testing"
 	"time"
 )
@@ -34,6 +35,13 @@ func TestToastSmoke(t *testing.T) {
 	c.AppName = "go-toast smoke"
 	if os.Getenv("GO_TOAST_RADIUS") != "" {
 		c.Palette, c.CornerRadius = Light, 10
+	}
+	// GO_TOAST_SHOT=file.png also saves a screenshot of the stack, so a run
+	// on a remote Mac (CI) shows what the cards look like. The cards must be
+	// capturable for that.
+	shot := os.Getenv("GO_TOAST_SHOT")
+	if shot != "" {
+		c.CaptureExclude = false
 	}
 	Configure(c)
 	SetOptions(DefaultOptions())
@@ -87,7 +95,7 @@ func TestToastSmoke(t *testing.T) {
 		if !p.exists || !p.visible || !p.onScreen || p.alpha < 0.5 {
 			t.Fatalf("card %d: exists %v visible %v onScreen %v alpha %.2f", i, p.exists, p.visible, p.onScreen, p.alpha)
 		}
-		if p.level < statusLevel || !p.sharingNone || p.ignoresMouse {
+		if p.level < statusLevel || p.sharingNone != (shot == "") || p.ignoresMouse {
 			t.Fatalf("card %d: level %d sharingNone %v ignoresMouse %v", i, p.level, p.sharingNone, p.ignoresMouse)
 		}
 		if p.frame.R != p.work.R-cardMarginDip || p.frame.R-p.frame.L != cardWidthDip {
@@ -99,6 +107,13 @@ func TestToastSmoke(t *testing.T) {
 		prev = p
 	}
 	newest := cards[len(cards)-1]
+	if shot != "" {
+		mouseAt(newest, evMove, 200, 30) // hover: the x lights up
+		time.Sleep(200 * time.Millisecond)
+		if out, err := exec.Command("screencapture", "-x", shot).CombinedOutput(); err != nil {
+			t.Logf("screencapture: %v %s", err, out)
+		}
+	}
 	np := infoOf(newest)
 	if np.frame.T != np.work.T+cardMarginDip {
 		t.Errorf("newest card %+v should be at the top margin of %+v", np.frame, np.work)

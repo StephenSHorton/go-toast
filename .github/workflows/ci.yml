@@ -29,6 +29,19 @@ jobs:
         run: |
           go test -v -count=1 -run Smoke .
           GO_TOAST_RADIUS=10 go test -v -count=1 -run Smoke .
+      - name: screenshots of the cards (capturable, so not the default setup)
+        if: runner.os == 'macOS'
+        env:
+          GO_TOAST_SMOKE: "1"
+        run: |
+          GO_TOAST_SHOT=$PWD/cards-dark.png go test -count=1 -run Smoke .
+          GO_TOAST_SHOT=$PWD/cards-light.png GO_TOAST_RADIUS=10 go test -count=1 -run Smoke .
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'macOS' && always()
+        with:
+          name: macos-cards
+          path: cards-*.png
+          if-no-files-found: warn
 
   cross:
     runs-on: ubuntu-latest
