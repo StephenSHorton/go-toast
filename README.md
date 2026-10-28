@@ -207,9 +207,27 @@ It checks placement, click-through and capture exclusion, clicks a button and
 right-clicks a card, and checks that the app never becomes active and that no
 card becomes key.
 
-CI (`.github/workflows/ci.yml`) runs `go vet` and `go test` on Windows
-(amd64 and 386) and on macOS. It runs the macOS smoke test on the runner's
-desktop, and it cross-builds Linux, Windows, and macOS without cgo.
+### Checks (run locally - no CI)
+
+There is no CI on pull requests or pushes, to save GitHub Actions minutes.
+Before opening or merging a PR (or pushing to `main`), run these locally and
+make sure they pass:
+
+```
+# any OS
+go vet ./...
+go test ./...
+GOOS=linux go build ./...
+GOOS=darwin CGO_ENABLED=0 go build ./...   # no-cgo macOS falls back to the no-op backend
+GOOS=windows go build ./...
+
+# Windows only
+GOARCH=386 go test ./...
+
+# macOS only (opens real cards on the desktop)
+GO_TOAST_SMOKE=1 go test -v -count=1 -run Smoke .
+GO_TOAST_SMOKE=1 GO_TOAST_RADIUS=10 go test -v -count=1 -run Smoke .
+```
 
 ## Licence
 
