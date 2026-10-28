@@ -4,6 +4,8 @@
 // from Go code that the main thread itself called into: goToastSync,
 // goToastTick, goToastRehome, goToastMouse).
 
+#pragma once
+
 #include <stdint.h>
 
 typedef struct {

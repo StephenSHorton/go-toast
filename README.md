@@ -1,14 +1,19 @@
 # go-toast
 
-Small native notification cards for Windows apps written in Go. Cards stack in
-a corner of the monitor you're working on, sit above every other window, and
+Small native notification cards for Go apps on Windows and macOS. Cards stack
+in a corner of the screen you're working on, sit above every other window, and
 never take focus, so they're safe to show over a game. Each card can play one
 of three short sounds.
 
 This is the notification system from [Toru](https://github.com/StephenSHorton/toru),
-pulled out into its own module. It depends only on `golang.org/x/sys`.
-It draws with plain Win32/GDI (no webview, no cgo). On other platforms every
-call does nothing, so code that uses it still builds everywhere.
+pulled out into its own module. The same API and the same cards work on both
+platforms:
+
+| Platform | Backend |
+|---|---|
+| Windows | Plain Win32/GDI windows (no webview, no cgo). Depends only on `golang.org/x/sys`. |
+| macOS | AppKit panels via cgo and Objective-C. See [macOS notes](#macos-notes). |
+| Anything else | Every call does nothing, so code that uses it still builds. A macOS build with `CGO_ENABLED=0` gets this no-op backend too. |
 
 ```
 go get github.com/StephenSHorton/go-toast
@@ -26,6 +31,12 @@ import (
 )
 
 func main() {
+	// On macOS a plain Go program hands the main thread to AppKit with Main
+	// (a Wails app doesn't need it). Elsewhere Main just calls the function.
+	toast.Main(run)
+}
+
+func run() {
 	// Once, at startup, before the first Post. Start from DefaultConfig.
 	c := toast.DefaultConfig()
 	c.AppName = "MyApp"
@@ -70,6 +81,7 @@ func main() {
 | `HoldClickThrough()` | Lets clicks pass through the cards until you call the returned release. Holds can overlap. |
 | `Visible()` | Reports whether any card is on screen. |
 | `Configure` / `CurrentConfig` | The app-level setup (below). |
+| `Main(func())` | macOS: runs the function while the main thread runs AppKit's event loop. Only programs without a Cocoa event loop of their own need it. Elsewhere it just calls the function. |
 
 `Note` fields: `ID`, `Title`, `Body` (cut to two lines), `Kind`
 (`Info`, `Success`, `Warn`, `Error`), `Silent`, `Expire`, `Sticky`,
@@ -90,11 +102,11 @@ only affects cards created later.
 | Field | Default | |
 |---|---|---|
 | `AppName` | `"Toast"` | The windows' title. Also the log prefix (`myapp: toast: …`). |
-| `ClassPrefix` | from `AppName` | Window class names: cards use `ClassPrefix` and the hidden host window uses `ClassPrefix+"Host"`. `"Toru"` gives `ToruToast` and `ToruToastHost`. |
+| `ClassPrefix` | from `AppName` | Windows only. Window class names: cards use `ClassPrefix` and the hidden host window uses `ClassPrefix+"Host"`. `"Toru"` gives `ToruToast` and `ToruToastHost`. |
 | `Palette` | `Dark` | Card colors. |
 | `CornerRadius` | `0` | Corner rounding in dip. `0` is square; about `10` gives soft cards. |
-| `IgnoreInput` | `nil` | `func(extraInfo uintptr) bool`. It gets the `GetMessageExtraInfo` value of each mouse message a card receives; return true to drop that message. Use it to keep your app's own injected input (from `SendInput` with a tagged `dwExtraInfo`) from pressing a card. |
-| `CaptureExclude` | `true` | Hides cards from screenshots and screen recordings while they stay on screen (`WDA_EXCLUDEFROMCAPTURE`, Windows 10 2004+). |
+| `IgnoreInput` | `nil` | `func(extraInfo uintptr) bool`. It gets the `GetMessageExtraInfo` value of each mouse message a card receives; return true to drop that message. Use it to keep your app's own injected input (from `SendInput` with a tagged `dwExtraInfo`) from pressing a card. Windows only; macOS ignores it. |
+| `CaptureExclude` | `true` | Hides cards from screenshots and screen recordings while they stay on screen. Windows uses `WDA_EXCLUDEFROMCAPTURE` (Windows 10 2004+); macOS uses `NSWindowSharingNone`. |
 
 Start from `DefaultConfig()` rather than `Config{}`: in a zero literal,
 `CaptureExclude` is false.
@@ -116,13 +128,56 @@ Build colors with `toast.RGB(r, g, b)` or `toast.Hex("#rrggbb")`. The zero
 
 ## Behaviour notes
 
-- Cards never take focus. They are no-activate, tool-window, topmost popups.
-  A click on a card doesn't activate it either.
+- Cards never take focus. On Windows they are no-activate, tool-window,
+  topmost popups. On macOS they are non-activating panels that can never
+  become key or main. On both, clicking a card doesn't activate the app.
 - Exclusive-fullscreen games skip the desktop compositor, so nothing can draw
   over them. In that case the sound is the notification.
-- One locked OS thread, started by the first `Post`, owns all the windows.
-  Callbacks always run on their own goroutine, so a callback can call `Post`
-  or `Close`, or block, without hanging the cards.
+- On Windows, one locked OS thread, started by the first `Post`, owns all the
+  windows. On macOS the main thread owns them. Callbacks always run on their
+  own goroutine, so a callback can call `Post` or `Close`, or block, without
+  hanging the cards.
+
+## macOS notes
+
+- **cgo is required.** The backend is Objective-C (`toast_darwin.m`), so a
+  macOS build needs cgo and the Xcode command line tools. Wails apps already
+  build with cgo on the Mac. With `CGO_ENABLED=0` the package still builds,
+  but every call is a no-op.
+- **The main thread.** AppKit windows only work on the main thread, and only
+  while it runs an event loop. Creating one on another thread raises
+  `NSWindow should only be instantiated on the main thread!` and kills the
+  process, so the cards can't have a thread of their own as they do on
+  Windows. Instead the package queues its work on the main dispatch queue.
+  - In a Wails app, or any program with its own Cocoa event loop, this just
+    works. Cards posted before the loop starts appear when it does.
+  - A plain Go program must hand over its main thread: wrap `main` in
+    `toast.Main(run)`. `Main` runs `NSApp` on the main thread and runs `run`
+    on another goroutine. It returns when `run` returns. A binary with no
+    activation policy gets the Accessory one, which means no Dock icon and no
+    menu bar. If nothing ever runs the event loop, the package logs a warning
+    after 10 s and the cards don't show.
+  - The package locks the main goroutine to the main thread in `init`, so
+    `Main` can use that thread. Wails and other Cocoa bindings for Go do the
+    same.
+- **Placement.** The stack goes on the screen that has the mouse. It uses
+  that screen's `visibleFrame`, so it stays clear of the menu bar and the
+  Dock, and it moves if the screen layout changes. Cards are at the status
+  window level and show on every Space, including full-screen ones.
+  Geometry is in points, so Retina screens get sharp cards with no scaling
+  code.
+- **Input.** Hovering over the stack pauses expiry. A click on the body runs
+  `OnClick`. The x, a right click and a Control-click dismiss the card.
+  `HoldClickThrough` sets `ignoresMouseEvents`. `Config.IgnoreInput` has no
+  macOS equivalent and is ignored.
+- **Capture.** `CaptureExclude` sets `NSWindowSharingNone`. Some recorders
+  built on ScreenCaptureKit on recent macOS versions still capture such
+  windows, so treat it as best effort there.
+- **Sounds.** The same embedded WAVs play through `AVAudioPlayer` at
+  `Volume`.
+- **Look.** `Palette`, `CornerRadius` and `AppName` (the panels' title) work
+  as on Windows. The text uses the system font, and the icons are SF Symbols
+  (macOS 11+).
 
 ## Tests
 
@@ -133,6 +188,14 @@ go test ./...
 The smoke test opens real cards on the desktop and plays their sounds, so it
 only runs when you opt in: `GO_TOAST_SMOKE=1 go test -run Smoke .`. Add
 `GO_TOAST_RADIUS=10` to run it with the Light palette and rounded corners.
+There is one for Windows and one for macOS. The macOS one runs inside `Main`.
+It checks placement, click-through and capture exclusion, clicks a button and
+right-clicks a card, and checks that the app never becomes active and that no
+card becomes key.
+
+CI (`.github/workflows/ci.yml`) runs `go vet` and `go test` on Windows
+(amd64 and 386) and on macOS. It runs the macOS smoke test on the runner's
+desktop, and it cross-builds Linux, Windows, and macOS without cgo.
 
 ## Licence
 

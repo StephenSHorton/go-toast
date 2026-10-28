@@ -1,15 +1,16 @@
-// Package toast is a small native notification system for Windows apps:
-// cards stacked in a corner of the active monitor, over every other window,
+// Package toast is a small native notification system for Windows and macOS
+// apps: cards stacked in a corner of the active screen, over every other window,
 // that never take focus, with the s&box editor sounds (sounds/) that go with
 // each card. It was extracted from Toru, where replay, recording, the auto
 // clicker and the updater all post here.
 //
 // Set the app's look once at startup with Configure (start from
 // DefaultConfig), apply the user's settings with SetOptions, then Post.
-// Off Windows every call is a no-op, so cross-platform code builds.
+// On macOS a program without its own Cocoa event loop wraps main in Main. On
+// other platforms every call is a no-op, so cross-platform code builds.
 //
 // This file is the OS-agnostic model (notes, the stack, expiry, options); the
-// window that draws it is toast_windows.go.
+// windows that draw it are toast_windows.go and toast_darwin.go.
 package toast
 
 import (
